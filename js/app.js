@@ -234,6 +234,9 @@
   const likedPosts = new Set(storage.get("liked", []));
   const userPosts = storage.get("posts", []);
 
+  let currentUser = null;
+  let authKnown = false;
+
   const dayNumber = (d = new Date()) => Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
   const daysSinceLaunch = () => Math.max(0, dayNumber() - dayNumber(LAUNCH_DATE));
   const announcedCount = () => GAMES.length + daysSinceLaunch();
@@ -250,7 +253,18 @@
     windows: '<svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 4.5v7H3zM12 4.3 21 3v8.5h-9zM3 12.5h7.5v7L3 18.5zM12 12.5h9V21l-9-1.3z"/></svg>',
     apple: '<svg viewBox="0 0 24 24"><path d="M16.5 12.6c0-2.4 2-3.5 2-3.6-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.2-2.8.8-3.5.8-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 2.9 2.3 1.2 0 1.6-.7 3-.7s1.8.7 3 .7c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.6 1.3-2.6s-2.5-1-2.5-3.6zM14.2 5.5c.6-.8 1.1-1.9 1-3-1 0-2.1.7-2.8 1.5-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.6 2.8-1.4z"/></svg>',
     linux: '<svg viewBox="0 0 24 24"><path d="M12 2c-2 0-3.5 1.7-3.5 4.5 0 1.6.3 2.6-.8 4.3C6.2 13 5 15 5.5 17.5 6 20 8 21.5 12 21.5s6-1.5 6.5-4c.5-2.5-.7-4.5-2.2-6.7-1.1-1.7-.8-2.7-.8-4.3C15.5 3.7 14 2 12 2z"/><circle cx="10.5" cy="7" r=".6"/><circle cx="13.5" cy="7" r=".6"/><path d="M10.5 9.5 12 10.5l1.5-1"/></svg>',
+    google: '<svg class="g-logo" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>',
+    user: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>',
+    logout: '<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
   };
+
+  const AVATAR_COLORS = ["#b8f03a", "#3fe0f0", "#f3e600", "#ff5d9e", "#9d7bff", "#ff8a3d"];
+  const avatarColor = (seed = "") => AVATAR_COLORS[[...seed].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
+  const avatarInner = (u) =>
+    u.photo
+      ? `<img src="${esc(u.photo)}" alt="" referrerpolicy="no-referrer">`
+      : `<span class="avatar-initial">${esc((u.name || "?")[0].toUpperCase())}</span>`;
+  const avatarStyle = (u) => (u.photo ? "" : `background:${avatarColor(u.uid || u.name)}`);
 
   /* ================= Shared UI ================= */
 
@@ -574,24 +588,32 @@
 
   function viewCommunity() {
     const posts = [...userPosts, ...FEED_SEED];
-    const avatar = (name, color) => `<span class="post-avatar" style="background:${color}">${esc(name[0].toUpperCase())}</span>`;
+    const avatar = (p) =>
+      p.photo
+        ? `<span class="post-avatar"><img src="${esc(p.photo)}" alt="" referrerpolicy="no-referrer"></span>`
+        : `<span class="post-avatar" style="background:${p.color}">${esc(p.user[0].toUpperCase())}</span>`;
     return `
       <h1 class="page-title">Community</h1>
       <p class="page-sub">${(48211 + daysSinceLaunch() * 137).toLocaleString()} people waiting for something to download</p>
       <div class="feed">
         <div class="card">
-          <form class="composer" id="composer">
-            <span class="avatar"></span>
-            <input id="composerInput" maxlength="280" placeholder="Share your slop with the community..." aria-label="Write a post">
-            <button class="btn btn-accent" type="submit">Post</button>
-          </form>
+          ${currentUser ? `
+            <form class="composer" id="composer">
+              <span class="avatar" style="${avatarStyle(currentUser)}">${avatarInner(currentUser)}</span>
+              <input id="composerInput" maxlength="280" placeholder="Share your slop with the community..." aria-label="Write a post">
+              <button class="btn btn-accent" type="submit">Post</button>
+            </form>` : `
+            <div class="composer composer-locked">
+              <span>Sign in to post in the community.</span>
+              <button class="btn btn-accent" data-action="open-auth" data-mode="signin">Sign in</button>
+            </div>`}
           <div id="posts">
             ${posts.map((p, i) => {
               const key = p.id || "seed-" + i;
               const liked = likedPosts.has(key);
               return `
                 <article class="post">
-                  ${avatar(p.user, p.color)}
+                  ${avatar(p)}
                   <div style="flex:1;min-width:0">
                     <div class="post-head"><strong>${esc(p.user)}</strong><small>${esc(p.time)}</small></div>
                     <p>${esc(p.text)}</p>
@@ -643,6 +665,28 @@
       <h1 class="page-title">Settings</h1>
       <p class="page-sub">Tune SlopWare to your liking.</p>
       <div class="card settings">
+        <h3>Account</h3>
+        ${currentUser ? `
+          <div class="setting">
+            <div class="account-row">
+              <span class="avatar" style="${avatarStyle(currentUser)}">${avatarInner(currentUser)}</span>
+              <div>
+                <strong>${esc(currentUser.name)}</strong>
+                <small>${esc(currentUser.email)} · ${currentUser.provider === "google.com" ? "Signed in with Google" : currentUser.verified ? "Email verified" : "Email not verified yet"}</small>
+              </div>
+            </div>
+            <button class="btn btn-ghost" data-action="sign-out">${ICON.logout}<span>Sign out</span></button>
+          </div>` : `
+          <div class="setting">
+            <div><strong>You're browsing as a guest</strong><small>Sign in with Google or create an account with your email.</small></div>
+            <div class="buy-actions">
+              <button class="btn btn-ghost" data-action="open-auth" data-mode="signup">Create account</button>
+              <button class="btn btn-accent" data-action="open-auth" data-mode="signin">Sign in</button>
+            </div>
+          </div>`}
+      </div>
+      <div class="card settings">
+        <h3>Preferences</h3>
         ${SETTINGS.map(([key, title, desc, def]) => `
           <div class="setting">
             <div><strong>${title}</strong><small>${desc}</small></div>
@@ -721,6 +765,7 @@
     tickCountdown();
     window.scrollTo({ top: 0 });
     closeSearch();
+    closeAccountMenu();
   }
 
   window.addEventListener("hashchange", render);
@@ -880,11 +925,10 @@
 
   document.addEventListener("click", (e) => {
     const el = e.target.closest("[data-action]");
-    if (!el) {
-      if (!e.target.closest("#searchWrap")) closeSearch();
-      if (!e.target.closest(".bell-wrap")) $("#notifPanel").classList.remove("open");
-      return;
-    }
+    if (!e.target.closest("#searchWrap")) closeSearch();
+    if (!e.target.closest(".bell-wrap")) $("#notifPanel").classList.remove("open");
+    if (!e.target.closest(".account") || e.target.closest(".account-menu a")) closeAccountMenu();
+    if (!el) return;
     const { action, id } = el.dataset;
 
     switch (action) {
@@ -933,8 +977,35 @@
         el.classList.toggle("on");
         if (el.classList.contains("on")) toast("Same games. More slop. More love.");
         break;
-      case "profile":
-        toast("Profiles are coming soon too, slop.zip.");
+      case "open-auth":
+        openAuthModal(el.dataset.mode);
+        break;
+      case "auth-tab":
+        setAuthMode(el.dataset.mode);
+        break;
+      case "auth-google":
+        runAuth(async (auth) => {
+          const user = await auth.signInWithGoogle();
+          if (user) {
+            closeModal();
+            toast(`Welcome, ${user.name}!`);
+          }
+        });
+        break;
+      case "auth-reset":
+        resetPasswordFromForm();
+        break;
+      case "account-menu": {
+        const open = $("#accountMenu").classList.toggle("open");
+        el.setAttribute("aria-expanded", String(open));
+        break;
+      }
+      case "resend-verify":
+        callAuth((auth) => auth.resendVerification(), `Verification link sent to ${currentUser?.email}.`);
+        break;
+      case "sign-out":
+        closeAccountMenu();
+        callAuth((auth) => auth.signOut(), "Signed out. The slop will miss you.");
         break;
       case "like": {
         const key = el.dataset.key;
@@ -991,10 +1062,19 @@
   document.addEventListener("submit", (e) => {
     if (e.target.id !== "composer") return;
     e.preventDefault();
+    if (!currentUser) return openAuthModal("signin");
     const input = $("#composerInput");
     const text = input.value.trim();
     if (!text) return;
-    userPosts.unshift({ id: "u-" + Date.now(), user: "slop.zip", color: "#b8f03a", time: "Just now", text, likes: 0 });
+    userPosts.unshift({
+      id: "u-" + Date.now(),
+      user: currentUser.name,
+      color: avatarColor(currentUser.uid),
+      photo: currentUser.photo,
+      time: "Just now",
+      text,
+      likes: 0,
+    });
     storage.set("posts", userPosts.slice(0, 30));
     render();
     toast("Posted to the community.");
@@ -1004,6 +1084,186 @@
     const saved = storage.get("settings", {});
     $(".promo-card").style.display = saved.sleepyCat === false ? "none" : "";
   }
+
+  /* ================= Auth ================= */
+
+  const AUTH_COPY = {
+    signin: { title: "Welcome back", sub: "Sign in to your SlopWare account.", submit: "Sign in" },
+    signup: { title: "Create your account", sub: "One account for all your slop. Games are coming soon — your account is ready now.", submit: "Create account" },
+  };
+
+  const authUnavailableMessage = () =>
+    location.protocol === "file:"
+      ? "Sign-in needs the site to be served over http. Run “npx http-server” in the project folder."
+      : "Sign-in is still loading. Give it a second and try again.";
+
+  function openAuthModal(mode = "signin") {
+    const ready = window.SlopAuth;
+    openModal(`
+      <div class="auth" id="authBox" data-mode="${mode}">
+        <div class="auth-head">
+          <img class="mascot" src="assets/mascot.jpg" alt="">
+          <h3 id="authTitle"></h3>
+          <p id="authSub"></p>
+        </div>
+        <div class="auth-tabs" role="tablist">
+          <button role="tab" data-action="auth-tab" data-mode="signin">Sign in</button>
+          <button role="tab" data-action="auth-tab" data-mode="signup">Create account</button>
+        </div>
+        ${ready && !ready.configured ? `<div class="auth-notice">Sign-in isn't connected yet. Add your Firebase config to <code>js/firebase-config.js</code> to turn it on.</div>` : ""}
+        <button class="btn btn-google btn-block btn-lg" data-action="auth-google">${ICON.google}<span>Continue with Google</span></button>
+        <div class="auth-divider"><span>or with email</span></div>
+        <form id="authForm" novalidate>
+          <label class="field signup-only"><span>Display name</span><input name="name" autocomplete="nickname" maxlength="40" placeholder="slop.zip"></label>
+          <label class="field"><span>Email</span><input name="email" type="email" autocomplete="email" placeholder="you@gmail.com" required></label>
+          <label class="field">
+            <span>Password <button type="button" class="auth-link signin-only" data-action="auth-reset">Forgot password?</button></span>
+            <input name="password" type="password" minlength="6" placeholder="At least 6 characters" required>
+          </label>
+          <div class="auth-msg" id="authMsg" role="alert"></div>
+          <button class="btn btn-accent btn-block btn-lg" type="submit" id="authSubmit"></button>
+        </form>
+        <p class="auth-fine">By continuing you agree to receive a reasonable amount of slop.</p>
+      </div>`);
+    setAuthMode(mode);
+  }
+
+  function setAuthMode(mode) {
+    const box = $("#authBox");
+    if (!box) return;
+    const copy = AUTH_COPY[mode] || AUTH_COPY.signin;
+    box.dataset.mode = mode;
+    $("#authTitle").textContent = copy.title;
+    $("#authSub").textContent = copy.sub;
+    $("#authSubmit").textContent = copy.submit;
+    $('#authForm [name="password"]').autocomplete = mode === "signup" ? "new-password" : "current-password";
+    $$(".auth-tabs button", box).forEach((b) => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", String(on));
+    });
+    showAuthMsg("");
+  }
+
+  function showAuthMsg(text, ok = false) {
+    const msg = $("#authMsg");
+    if (!msg) return;
+    msg.textContent = text;
+    msg.classList.toggle("ok", ok);
+  }
+
+  async function runAuth(fn) {
+    const box = $("#authBox");
+    const auth = window.SlopAuth;
+    if (!auth) return showAuthMsg(authUnavailableMessage());
+    showAuthMsg("");
+    box?.classList.add("busy");
+    const controls = box ? $$("button, input", box) : [];
+    controls.forEach((c) => (c.disabled = true));
+    try {
+      await fn(auth);
+    } catch (err) {
+      const text = auth.describeError(err);
+      if (text) showAuthMsg(text);
+    } finally {
+      box?.classList.remove("busy");
+      controls.forEach((c) => (c.disabled = false));
+    }
+  }
+
+  async function callAuth(fn, successMsg) {
+    const auth = window.SlopAuth;
+    if (!auth) return toast(authUnavailableMessage());
+    try {
+      await fn(auth);
+      if (successMsg) toast(successMsg);
+    } catch (err) {
+      const text = auth.describeError(err);
+      if (text) toast(text);
+    }
+  }
+
+  function resetPasswordFromForm() {
+    const email = $('#authForm [name="email"]').value.trim();
+    if (!email) {
+      showAuthMsg("Enter your email above, then tap “Forgot password?” again.");
+      $('#authForm [name="email"]').focus();
+      return;
+    }
+    runAuth(async (auth) => {
+      await auth.resetPassword(email);
+      showAuthMsg(`If an account exists for ${email}, a reset link is on its way.`, true);
+    });
+  }
+
+  document.addEventListener("submit", (e) => {
+    if (e.target.id !== "authForm") return;
+    e.preventDefault();
+    const field = (n) => e.target.elements.namedItem(n).value;
+    const mode = $("#authBox").dataset.mode;
+    const name = mode === "signup" ? field("name").trim() : "";
+    const email = field("email").trim();
+    const password = field("password");
+
+    if (!email) return showAuthMsg("Enter your email.");
+    if (password.length < 6) return showAuthMsg("Password needs at least 6 characters.");
+
+    runAuth(async (auth) => {
+      if (mode === "signup") {
+        const user = await auth.signUpWithEmail(name, email, password);
+        closeModal();
+        toast(`Account created! We sent a verification link to ${user.email}.`);
+      } else {
+        const user = await auth.signInWithEmail(email, password);
+        closeModal();
+        toast(`Welcome back, ${user.name}!`);
+      }
+    });
+  });
+
+  function closeAccountMenu() {
+    $("#accountMenu")?.classList.remove("open");
+    $('[data-action="account-menu"]')?.setAttribute("aria-expanded", "false");
+  }
+
+  function updateAccountUI() {
+    const signIn = $("#signInBtn");
+    const account = $("#account");
+    signIn.classList.toggle("auth-pending", !authKnown);
+    signIn.hidden = Boolean(currentUser);
+    account.hidden = !currentUser;
+    if (!currentUser) return;
+
+    const avatar = $("#avatar");
+    avatar.setAttribute("style", avatarStyle(currentUser));
+    avatar.innerHTML = avatarInner(currentUser) + '<span class="online"></span>';
+    $("#profileName").textContent = currentUser.name;
+
+    const needsVerify = currentUser.provider === "password" && !currentUser.verified;
+    $("#accountMenu").innerHTML = `
+      <div class="account-head">
+        <span class="avatar" style="${avatarStyle(currentUser)}">${avatarInner(currentUser)}</span>
+        <div><strong>${esc(currentUser.name)}</strong><small>${esc(currentUser.email)}</small></div>
+      </div>
+      ${needsVerify ? `<div class="verify-note">Email not verified yet. <button data-action="resend-verify">Resend link</button></div>` : ""}
+      <a href="#/library" role="menuitem">Library &amp; wishlist</a>
+      <a href="#/settings" role="menuitem">Settings</a>
+      <button class="danger" data-action="sign-out" role="menuitem">${ICON.logout}<span>Sign out</span></button>`;
+  }
+
+  window.addEventListener("slop:auth", (e) => {
+    const signature = (u) => (u ? [u.uid, u.name, u.photo, u.verified].join("|") : "");
+    const changed = signature(currentUser) !== signature(e.detail);
+    currentUser = e.detail;
+    authKnown = true;
+    updateAccountUI();
+    const route = parseHash().parts[0];
+    if (changed && (route === "community" || route === "settings")) render();
+  });
+
+  setTimeout(() => {
+    if (!authKnown) $("#signInBtn").classList.remove("auth-pending");
+  }, 2500);
 
   /* ================= Timers ================= */
 
